@@ -9,43 +9,76 @@ init_db()
 
 st.set_page_config(page_title="Alpha Horizon Terminal", layout="wide")
 
-# --- STRICT PURE LIGHT THEME CSS INJECTION ---
+# --- FORCED PURE LIGHT THEME CSS INJECTION ---
 st.markdown("""
 <style>
-    /* Force complete white background and pure black/dark text */
+    /* 1. Global Viewport & Container Reset */
     html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="stAppViewBlockContainer"] {
         background-color: #FFFFFF !important;
-        color: #111111 !important;
+        color: #0F172A !important;
     }
     
-    /* Ensure all text, titles, labels stay visible & dark */
-    h1, h2, h3, h4, h5, h6, p, span, div, label {
-        color: #111111 !important;
+    /* 2. Text & Typography Overrides */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li {
+        color: #0F172A !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background-color: #F8F9FA !important;
-        border-right: 1px solid #E5E7EB !important;
+
+    /* 3. Input Boxes & Text Areas (Fixes Black Box Glitch) */
+    textarea, input, [data-baseweb="textarea"], [data-baseweb="input"], [data-baseweb="base-input"] {
+        background-color: #FFFFFF !important;
+        color: #0F172A !important;
+        -webkit-text-fill-color: #0F172A !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px !important;
+    }
+    textarea:focus, input:focus {
+        border-color: #2563EB !important;
+        box-shadow: 0 0 0 1px #2563EB !important;
+    }
+
+    /* 4. Buttons (Fixes Black Button Glitch) */
+    .stButton > button {
+        background-color: #F8FAFC !important;
+        color: #0F172A !important;
+        -webkit-text-fill-color: #0F172A !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+        padding: 8px 16px !important;
+    }
+    .stButton > button:hover {
+        background-color: #E2E8F0 !important;
+        border-color: #94A3B8 !important;
     }
     
-    /* Zerodha Kite Watchlist Card Styling */
+    /* Primary Red Action Button */
+    .stButton > button[kind="primary"] {
+        background-color: #EF4444 !important;
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        border: none !important;
+        font-weight: 700 !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #DC2626 !important;
+    }
+
+    /* 5. Zerodha Kite Watchlist Cards */
     .kite-row {
         background: #FFFFFF;
-        border: 1px solid #E5E7EB;
+        border: 1px solid #E2E8F0;
         border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 10px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         transition: transform 0.1s ease, box-shadow 0.1s ease;
     }
     .kite-row:hover {
-        border-color: #CBD5E1;
+        border-color: #94A3B8;
         box-shadow: 0 4px 6px -1px rgba(0,0,0,0.08);
     }
     
-    /* Price color classes */
     .bull-green {
         color: #00A25B !important;
         font-weight: 700;
@@ -55,74 +88,82 @@ st.markdown("""
         font-weight: 700;
     }
     
-    /* Sub-text tags */
     .ticker-sub {
         font-size: 0.75rem;
         color: #64748B !important;
         font-weight: 600;
+        margin-left: 4px;
     }
     
     .pill-bull {
         background-color: #E6F7EF;
         color: #00A25B !important;
         font-size: 0.75rem;
-        padding: 2px 8px;
+        padding: 3px 8px;
         border-radius: 4px;
-        font-weight: 600;
+        font-weight: 700;
     }
     .pill-bear {
         background-color: #FDF0EE;
         color: #DF514C !important;
         font-size: 0.75rem;
-        padding: 2px 8px;
+        padding: 3px 8px;
         border-radius: 4px;
-        font-weight: 600;
+        font-weight: 700;
+    }
+
+    /* Expander styling */
+    [data-testid="stExpander"] {
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 8px !important;
+        margin-bottom: 15px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize Session State for active watchlist
+# Master list aggregation
+ALL_INBUILT_TICKERS = list(dict.fromkeys(
+    CURATED_UNIVERSES["Nifty 50 Heavyweights"] +
+    CURATED_UNIVERSES["High-Growth Midcaps"] +
+    CURATED_UNIVERSES["Top 50 Liquid ETFs"]
+))
+ALL_CLEAN_NAMES = ", ".join([t.replace(".NS", "") for t in ALL_INBUILT_TICKERS])
+
 if "active_watchlist" not in st.session_state:
-    st.session_state.active_watchlist = "TRENT, VBL, POLYCAB, KEI, NIFTYBEES, GOLDBEES"
+    st.session_state.active_watchlist = ALL_CLEAN_NAMES
 
 st.title("📊 Alpha Horizon Watchlist Terminal")
 
-# Top Indices Strip (Zerodha Kite Style)
+# Top Indices Strip
 col_idx1, col_idx2, col_idx3, col_idx4 = st.columns(4)
 col_idx1.metric("NIFTY 50", "23,346.40", "+75.80 (+0.32%)")
 col_idx2.metric("BANK NIFTY", "56,358.70", "+302.95 (+0.54%)")
 col_idx3.metric("INDIA VIX", "13.45", "-0.40 (-2.88%)", delta_color="inverse")
-col_idx4.metric("SYSTEM STATE", "LIVE ENGINE", "Ready")
+col_idx4.metric("SYSTEM STATE", "ONLINE", "Ready")
 
 st.markdown("---")
 
 tab1, tab2, tab3 = st.tabs(["📱 Kite Watchlist & Scanner", "📜 Performance Ledger", "🧪 Backtest Sandbox"])
 
-# --- SIDEBAR: INBUILT DISCOVERY & QUEUE ---
-st.sidebar.subheader("🔍 Inbuilt Stock & ETF Finder")
-st.sidebar.caption("Tap any button below to instantly populate your watchlist:")
+# --- SIDEBAR CONFIGURATION ---
+st.sidebar.subheader("🔍 Inbuilt Market Finder")
+st.sidebar.caption("Tap below to load all 50+ Heavyweights, Midcaps, and Liquid ETFs into your queue:")
 
-if st.sidebar.button("🏢 Load Nifty 50 Giants"):
-    st.session_state.active_watchlist = ", ".join([t.replace(".NS", "") for t in CURATED_UNIVERSES["Nifty 50 Heavyweights"][:12]])
-
-if st.sidebar.button("🚀 Load High-Growth Midcaps"):
-    st.session_state.active_watchlist = ", ".join([t.replace(".NS", "") for t in CURATED_UNIVERSES["High-Growth Midcaps"]])
-
-if st.sidebar.button("🪙 Load Top 50 Liquid ETFs"):
-    st.session_state.active_watchlist = ", ".join([t.replace(".NS", "") for t in CURATED_UNIVERSES["Top 50 Liquid ETFs"][:15]])
+if st.sidebar.button("⚡ Run Inbuilt Market Finder (Load All)"):
+    st.session_state.active_watchlist = ALL_CLEAN_NAMES
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Active Watchlist Queue")
 
-# Editable text area bound to session state
 watchlist_input = st.sidebar.text_area(
     "Tickers in Queue (Comma separated):", 
     value=st.session_state.active_watchlist,
-    height=120
+    height=160
 )
 st.session_state.active_watchlist = watchlist_input
 
-# Parse tickers safely
 parsed_tickers = []
 if watchlist_input:
     for token in [t.strip().upper() for t in watchlist_input.split(",") if t.strip()]:
@@ -137,37 +178,44 @@ run_scan = st.sidebar.button("🚀 Run Quantitative Scan", type="primary")
 with tab1:
     if run_scan:
         if not parsed_tickers:
-            st.warning("Please add or select tickers to scan.")
+            st.warning("No tickers found in the active queue. Tap 'Run Inbuilt Market Finder' to load assets.")
         else:
-            with st.status("⚡ Scanning Market Technicals & Volume Flow...", expanded=True) as status:
-                st.write("🔄 Syncing historical target records...")
+            with st.status(f"⚡ Running Screening Engine on {len(parsed_tickers)} queued assets...", expanded=True) as status:
+                st.write("🔄 Auditing past tracked positions...")
                 update_past_predictions()
-                st.write(f"📈 Querying OHLC data for {len(parsed_tickers)} assets...")
+                st.write("📈 Pulling technical candle blocks & volumes...")
                 engine = StockScreeningEngine(parsed_tickers)
                 engine.fetch_data()
-                st.write("🛡️ Evaluating 200 SMA trends, RVol footprints & ML Signal Confidence...")
+                st.write("🤖 Deriving RSI, SMA filters, FII/DII flow & ML confidence...")
                 results_df = engine.apply_filters()
-                status.update(label="✅ Scan Complete!", state="complete", expanded=False)
+                status.update(label="✅ Quantitative Analysis Complete!", state="complete", expanded=False)
                 
             if not results_df.empty:
-                st.subheader(f"Watchlist Results ({len(results_df)} Assets)")
+                # Segment Equities vs ETFs
+                is_etf = results_df["RawTicker"].isin(CURATED_UNIVERSES["Top 50 Liquid ETFs"]) | results_df["Ticker"].str.contains("BEES|ETF|MON100|MAFANG", case=False, regex=True)
+                stocks_df = results_df[~is_etf].copy()
+                etfs_df = results_df[is_etf].copy()
                 
-                # Render each stock card in Zerodha Watchlist aesthetic
-                for _, row in results_df.iterrows():
-                    is_bull = row["Momentum Vector"] == "Bullish"
-                    color_cls = "bull-green" if is_bull else "bear-red"
-                    pill_cls = "pill-bull" if is_bull else "pill-bear"
-                    chg_sign = "+" if row["Price Change"] >= 0 else ""
-                    
-                    with st.container():
+                # Render function for Kite cards
+                def render_watchlist_cards(df, title_label):
+                    st.markdown(f"### {title_label} ({len(df)})")
+                    if df.empty:
+                        st.info("No assets qualified under structural thresholds today.")
+                        return
+                    for _, row in df.iterrows():
+                        is_bull = row["Momentum Vector"] == "Bullish"
+                        color_cls = "bull-green" if is_bull else "bear-red"
+                        pill_cls = "pill-bull" if is_bull else "pill-bear"
+                        chg_sign = "+" if row["Price Change"] >= 0 else ""
+                        
                         st.markdown(f"""
                         <div class="kite-row">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <span style="font-size: 1.15rem; font-weight: 700; color: #111;">{row['Ticker']}</span>
+                                    <span style="font-size: 1.15rem; font-weight: 700; color: #0F172A;">{row['Ticker']}</span>
                                     <span class="ticker-sub">NSE</span>
                                     <span class="{pill_cls}" style="margin-left: 8px;">{row['Momentum Vector'].upper()}</span>
-                                    <span style="font-size: 0.8rem; background: #F1F5F9; color: #475569; padding: 2px 6px; border-radius: 4px; margin-left: 4px; font-weight: 600;">RVol: {row['RVol']}x</span>
+                                    <span style="font-size: 0.8rem; background: #F1F5F9; color: #334155; padding: 2px 6px; border-radius: 4px; margin-left: 4px; font-weight: 600;">RVol: {row['RVol']}x</span>
                                 </div>
                                 <div style="text-align: right;">
                                     <div class="{color_cls}" style="font-size: 1.15rem;">₹{row['Current Price']}</div>
@@ -183,18 +231,14 @@ with tab1:
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Expandable drawer for deep analytics
-                        with st.expander(f"📊 View Deep Analytics & Chart Link for {row['Ticker']}"):
+                        with st.expander(f"📊 Deep Analysis & Charts for {row['Ticker']}"):
                             c1, c2, c3 = st.columns(3)
                             c1.metric("ML Signal Confidence", f"{row['ML Signal Confidence']}%")
                             c2.metric("Institutional Volume (FII/DII)", row["FII/DII Institutional Flow"])
                             c3.metric("Relative Volume Footprint", f"{row['RVol']}x Average")
                             
-                            st.markdown(f"""
-                            👉 **[Open {row['Ticker']} Live Chart on TradingView ↗]({row['TradingView Link']})**
-                            """, unsafe_allow_html=True)
+                            st.markdown(f"👉 **[Open {row['Ticker']} Live Chart on TradingView ↗]({row['TradingView Link']})**")
                             
-                            # Local Candlestick preview
                             try:
                                 df_c = yf.Ticker(row["RawTicker"]).history(period="3mo")
                                 fig = go.Figure(data=[go.Candlestick(
@@ -202,9 +246,8 @@ with tab1:
                                     low=df_c['Low'], close=df_c['Close']
                                 )])
                                 fig.update_layout(
-                                    title=f"{row['Ticker']} 3-Month Price Action",
-                                    height=300,
-                                    margin=dict(l=20, r=20, t=40, b=20),
+                                    height=260,
+                                    margin=dict(l=10, r=10, t=20, b=10),
                                     xaxis_rangeslider_visible=False,
                                     paper_bgcolor='#FFFFFF',
                                     plot_bgcolor='#FFFFFF'
@@ -212,10 +255,14 @@ with tab1:
                                 st.plotly_chart(fig, use_container_width=True)
                             except Exception:
                                 st.caption("Chart preview unavailable.")
+
+                render_watchlist_cards(stocks_df, "📈 Verified Equity Stock Setups")
+                st.markdown("---")
+                render_watchlist_cards(etfs_df, "📊 Verified Sector & Index ETF Setups")
             else:
                 st.info("No matching trend setups found for the selected tickers.")
     else:
-        st.info("👈 Choose an inbuilt universe from the sidebar or type tickers, then tap **'🚀 Run Quantitative Scan'**.")
+        st.info("👈 Tap **'⚡ Run Inbuilt Market Finder'** in the sidebar, then tap **'🚀 Run Quantitative Scan'** to analyze all stocks and ETFs.")
 
 # --- TAB 2: AUDIT & LEDGER ---
 with tab2:
@@ -251,7 +298,7 @@ with tab3:
     
     if st.button("🔬 Execute Backtest Simulation"):
         with st.spinner("Processing historical backtest cycles..."):
-            engine = StockScreeningEngine(parsed_tickers if parsed_tickers else CURATED_UNIVERSES["Nifty 50 Heavyweights"][:10])
+            engine = StockScreeningEngine(parsed_tickers[:15] if parsed_tickers else CURATED_UNIVERSES["Nifty 50 Heavyweights"][:10])
             engine.fetch_data()
             bt_df = engine.run_backtest()
             
