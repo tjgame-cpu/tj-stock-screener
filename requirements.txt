@@ -1,6 +1,7 @@
-streamlit==1.28.2
+streamlit
 pandas
 numpy
 yfinance
 scikit-learn
 openpyxl
+plotly
