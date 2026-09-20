@@ -5,10 +5,38 @@ import sqlite3
 from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier
 
-DB_NAME = "predictions_v3.db"
+# Clean database generation for extended metrics
+DB_NAME = "predictions_v5.db"
+
+# --- INBUILT DISCOVERY UNIVERSES ---
+CURATED_UNIVERSES = {
+    "Nifty 50 Heavyweights": [
+        "RELIANCE.NS", "HDFCBANK.NS", "BHARTIARTL.NS", "ICICIBANK.NS", "SBIN.NS",
+        "TCS.NS", "INFY.NS", "BAJFINANCE.NS", "HINDUNILVR.NS", "LT.NS",
+        "SUNPHARMA.NS", "MARUTI.NS", "M&M.NS", "HCLTECH.NS", "AXISBANK.NS",
+        "ITC.NS", "NTPC.NS", "ONGC.NS", "KOTAKBANK.NS", "TITAN.NS",
+        "TATASTEEL.NS", "POWERGRID.NS", "ULTRACEMCO.NS", "COALINDIA.NS", "ADANIENT.NS"
+    ],
+    "High-Growth Midcaps": [
+        "TRENT.NS", "VBL.NS", "POLYCAB.NS", "KEI.NS", "NCC.NS",
+        "DIXON.NS", "PERSISTENT.NS", "COFORGE.NS", "BSE.NS", "HAL.NS",
+        "BEL.NS", "MAZDOCK.NS", "RVNL.NS", "SUZLON.NS", "IDEA.NS"
+    ],
+    "Top 50 Liquid ETFs": [
+        "NIFTYBEES.NS", "JUNIORBEES.NS", "BANKBEES.NS", "ITBEES.NS", "GOLDBEES.NS", 
+        "SILVERBEES.NS", "LIQUIDBEES.NS", "PHARMABEES.NS", "CONSUMBEES.NS", "AUTOBEES.NS",
+        "MID150BEES.NS", "SETFNIF50.NS", "SETFNIFBK.NS", "SBIETFNIF.NS", "ICICINIFTY.NS",
+        "ICICIBANKN.NS", "ICICITECH.NS", "ICICIPHARM.NS", "ICICINXT.NS", "HDFCNIFTY.NS",
+        "HDFCBANKETF.NS", "HDFCGOLD.NS", "HDFCSENETF.NS", "UTINIFTETF.NS", "AXISNIFTY.NS",
+        "KOTAKNIFTY.NS", "KOTAKBKETF.NS", "KOTAKGOLD.NS", "MOM100.NS", "MON100.NS",
+        "MAFANG.NS", "MASPTOP50.NS", "MOGROW.NS", "CPSEETF.NS", "BHARAT22.NS",
+        "NV20BEES.NS", "PSUBNKBEES.NS", "MAKEINDIA.NS", "ALPL30BEES.NS", "INFRABEES.NS",
+        "DIVOPPBEES.NS", "ICICILIQ.NS", "LIQUIDCASE.NS", "ICICIMCAP.NS", "SETFNN50.NS",
+        "AXISCBPETF.NS", "EBBETF0430.NS", "HDFCLOWVOL.NS", "ICICIALPHA.NS", "KOTAKALPHA.NS"
+    ]
+}
 
 def init_db():
-    """Initializes the V3 SQLite database schema with RVOL, R:R, and 3 Target Horizons."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
@@ -18,18 +46,15 @@ def init_db():
             ticker TEXT,
             signal_price REAL,
             direction TEXT,
-            buy_zone TEXT,
-            stop_loss TEXT,
-            rvol REAL,
-            risk_reward REAL,
             ml_confidence REAL,
-            target_1_15 REAL,
-            target_16_45 REAL,
-            target_46_90 REAL,
+            entry_range TEXT,
+            stoploss REAL,
+            rvol REAL,
+            target_short REAL,
+            target_long REAL,
             fii_dii_status TEXT,
-            status_1_15 TEXT DEFAULT 'Tracking',
-            status_16_45 TEXT DEFAULT 'Tracking',
-            status_46_90 TEXT DEFAULT 'Tracking',
+            status_short TEXT DEFAULT 'Tracking',
+            status_long TEXT DEFAULT 'Tracking',
             days_elapsed INTEGER DEFAULT 0
         )
     ''')
@@ -37,14 +62,10 @@ def init_db():
     conn.close()
 
 def update_past_predictions():
-    """Audits past entries against daily high/low bars across all 3 timeframes."""
     init_db()
     conn = sqlite3.connect(DB_NAME)
     try:
-        df_pending = pd.read_sql_query(
-            "SELECT * FROM predictions WHERE status_1_15='Tracking' OR status_16_45='Tracking' OR status_46_90='Tracking'", 
-            conn
-        )
+        df_pending = pd.read_sql_query("SELECT * FROM predictions WHERE status_short='Tracking' OR status_long='Tracking'", conn)
     except Exception:
         conn.close()
         return
@@ -70,40 +91,28 @@ def update_past_predictions():
                 days_passed = len(post_data)
                 direction = row['direction']
                 
-                window_15 = post_data.head(15)
-                window_45 = post_data.head(45)
-                window_90 = post_data.head(90)
+                short_window = post_data.head(15)
+                long_window = post_data.head(90)
                 
-                status_1_15 = row['status_1_15']
-                status_16_45 = row['status_16_45']
-                status_46_90 = row['status_46_90']
+                status_short = row['status_short']
+                status_long = row['status_long']
                 
-                # Horizon 1: 1-15 Days
-                if status_1_15 == 'Tracking':
-                    if direction == "Bullish" and window_15['High'].max() >= row['target_1_15']: status_1_15 = 'Hit'
-                    elif direction == "Bearish" and window_15['Low'].min() <= row['target_1_15']: status_1_15 = 'Hit'
-                    elif days_passed >= 15: status_1_15 = 'Missed'
-                
-                # Horizon 2: 16-45 Days
-                if status_16_45 == 'Tracking':
-                    if direction == "Bullish" and window_45['High'].max() >= row['target_16_45']: status_16_45 = 'Hit'
-                    elif direction == "Bearish" and window_45['Low'].min() <= row['target_16_45']: status_16_45 = 'Hit'
-                    elif days_passed >= 45: status_16_45 = 'Missed'
+                if status_short == 'Tracking':
+                    if direction == "Bullish" and short_window['High'].max() >= row['target_short']: status_short = 'Hit'
+                    elif direction == "Bearish" and short_window['Low'].min() <= row['target_short']: status_short = 'Hit'
+                    elif days_passed >= 15: status_short = 'Missed'
                         
-                # Horizon 3: 46-90 Days
-                if status_46_90 == 'Tracking':
-                    if direction == "Bullish" and window_90['High'].max() >= row['target_46_90']: status_46_90 = 'Hit'
-                    elif direction == "Bearish" and window_90['Low'].min() <= row['target_46_90']: status_46_90 = 'Hit'
-                    elif days_passed >= 90: status_46_90 = 'Missed'
+                if status_long == 'Tracking':
+                    if direction == "Bullish" and long_window['High'].max() >= row['target_long']: status_long = 'Hit'
+                    elif direction == "Bearish" and long_window['Low'].min() <= row['target_long']: status_long = 'Hit'
+                    elif days_passed >= 90: status_long = 'Missed'
                 
                 cursor = conn.cursor()
                 cursor.execute('''
-                    UPDATE predictions 
-                    SET status_1_15 = ?, status_16_45 = ?, status_46_90 = ?, days_elapsed = ? 
-                    WHERE id = ?
-                ''', (status_1_15, status_16_45, status_46_90, days_passed, row['id']))
+                    UPDATE predictions SET status_short = ?, status_long = ?, days_elapsed = ? WHERE id = ?
+                ''', (status_short, status_long, days_passed, row['id']))
         except Exception as e:
-            print(f"Tracking ledger check error for {ticker}: {e}")
+            print(f"Update error for {ticker}: {e}")
             
     conn.commit()
     conn.close()
@@ -115,16 +124,14 @@ class StockScreeningEngine:
         init_db()
         
     def fetch_data(self):
-        """Fetches 1 year of daily historical information for calculations."""
         for ticker in self.tickers:
             try:
                 t = yf.Ticker(ticker)
                 hist = t.history(period="1y")
-                if hist.empty or len(hist) < 200:
-                    continue
-                self.data_store[ticker] = {"history": hist, "info": t.info}
-            except Exception:
-                pass 
+                if not hist.empty and len(hist) > 50:
+                    self.data_store[ticker] = {"history": hist, "info": {}}
+            except Exception as e:
+                print(f"Skipping {ticker}: {e}")
 
     def apply_filters(self):
         screened_results = []
@@ -135,247 +142,138 @@ class StockScreeningEngine:
         for ticker, data in self.data_store.items():
             hist = data["history"].copy()
             close_prices = hist['Close']
-            current_price = close_prices.iloc[-1]
             
-            # --- Technical Indicator Calculations ---
-            ema_20 = close_prices.ewm(span=20, adjust=False).mean()
-            ema_50 = close_prices.ewm(span=50, adjust=False).mean()
-            sma_200 = close_prices.rolling(window=200).mean()
+            # 200 SMA Structural Floor
+            sma_200 = close_prices.rolling(window=200).mean().iloc[-1] if len(close_prices) >= 200 else close_prices.rolling(window=50).mean().iloc[-1]
+            current_price = round(close_prices.iloc[-1], 2)
+            prev_close = round(close_prices.iloc[-2], 2)
             
-            e20 = ema_20.iloc[-1]
-            e50 = ema_50.iloc[-1]
-            s200 = sma_200.iloc[-1]
+            price_change = round(current_price - prev_close, 2)
+            price_change_pct = round(((current_price - prev_close) / prev_close) * 100, 2)
             
-            if pd.isna(s200): continue
+            # Relative Volume (RVol) institutional metrics
+            hist['Vol_SMA'] = hist['Volume'].rolling(window=20).mean()
+            last_vol = hist['Volume'].iloc[-1]
+            avg_vol = hist['Vol_SMA'].iloc[-1] if hist['Vol_SMA'].iloc[-1] > 0 else 1.0
+            rvol = round(float(last_vol / avg_vol), 2)
             
-            # --- 1. Dual Trend Architecture ---
-            if current_price >= e20 and e20 >= e50:
-                direction = "Bullish"
-            elif current_price < e20 and e20 < e50:
-                direction = "Bearish"
-            elif current_price >= e20 and e20 < e50:
-                direction = "Bullish"  # Recovery Swing
+            # FII/DII Proxy Indicator
+            if rvol >= 1.5 and price_change > 0:
+                fii_dii_flow = "Institutional Accumulation"
+            elif rvol >= 1.5 and price_change < 0:
+                fii_dii_flow = "Institutional Distribution"
             else:
-                direction = "Bearish"  # Pullback Swing
+                fii_dii_flow = "Normal Market Rotation"
                 
-            # --- 2. Chaikin Money Flow (CMF 20-Day) ---
-            mf_multiplier = ((hist['Close'] - hist['Low']) - (hist['High'] - hist['Close'])) / (hist['High'] - hist['Low'] + 1e-9)
-            mf_volume = mf_multiplier * hist['Volume']
-            cmf_20 = mf_volume.rolling(20).sum() / (hist['Volume'].rolling(20).sum() + 1e-9)
-            last_cmf = cmf_20.iloc[-1]
+            # Directional Trend
+            direction = "Bullish" if current_price >= sma_200 else "Bearish"
             
-            if last_cmf > 0.08:
-                fii_dii_flow = "Heavy Accumulation"
-            elif last_cmf < -0.08:
-                fii_dii_flow = "Heavy Distribution"
-            else:
-                fii_dii_flow = "Normal Rotation"
-
-            # --- 3. Relative Volume (RVOL 20-Day) ---
-            vol_sma20 = hist['Volume'].rolling(20).mean().iloc[-1]
-            today_vol = hist['Volume'].iloc[-1]
-            rvol_val = round(today_vol / (vol_sma20 + 1e-9), 2)
-            rvol_str = f"{rvol_val}x" + (" 🔥" if rvol_val >= 1.3 else "")
-
-            # --- 4. ATR Volatility Target & Stop Loss Scaling ---
-            high_low = hist['High'] - hist['Low']
-            high_close = np.abs(hist['High'] - hist['Close'].shift())
-            low_close = np.abs(hist['Low'] - hist['Close'].shift())
-            tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr_14 = tr.rolling(window=14).mean().iloc[-1]
-            
-            if pd.isna(atr_14) or atr_14 == 0:
-                atr_14 = current_price * 0.02
-                
-            atr_pct = atr_14 / current_price
-            
-            # Calculate Buy Zone Range, Stop Loss, and 3 Timeframe Targets
-            if direction == "Bullish":
-                buy_min = round(current_price - (0.5 * atr_14), 2)
-                buy_max = round(current_price + (0.3 * atr_14), 2)
-                buy_zone_str = f"₹{buy_min:,.2f} - ₹{buy_max:,.2f}"
-
-                sl_price = round(current_price - (1.5 * atr_14), 2)
-                sl_pct = round(((sl_price - current_price) / current_price) * 100, 1)
-                sl_str = f"₹{sl_price:,.2f} ({sl_pct}%)"
-
-                target_1_15 = round(current_price * (1 + (atr_pct * 2.2)), 2)
-                target_16_45 = round(current_price * (1 + (atr_pct * 3.5)), 2)
-                target_46_90 = round(current_price * (1 + (atr_pct * 5.0)), 2)
-                
-                risk = current_price - sl_price
-                reward_1_15 = target_1_15 - current_price
-            else:
-                buy_min = round(current_price - (0.3 * atr_14), 2)
-                buy_max = round(current_price + (0.5 * atr_14), 2)
-                buy_zone_str = f"₹{buy_min:,.2f} - ₹{buy_max:,.2f}"
-
-                sl_price = round(current_price + (1.5 * atr_14), 2)
-                sl_pct = round(((sl_price - current_price) / current_price) * 100, 1)
-                sl_str = f"₹{sl_price:,.2f} (+{sl_pct}%)"
-
-                target_1_15 = round(current_price * (1 - (atr_pct * 2.2)), 2)
-                target_16_45 = round(current_price * (1 - (atr_pct * 3.5)), 2)
-                target_46_90 = round(current_price * (1 - (atr_pct * 5.0)), 2)
-
-                risk = sl_price - current_price
-                reward_1_15 = current_price - target_1_15
-
-            rr_ratio = round(reward_1_15 / (risk + 1e-9), 2)
-            rr_str = f"{rr_ratio}x"
-
-            pct_1_15 = round(((target_1_15 - current_price) / current_price) * 100, 1)
-            pct_16_45 = round(((target_16_45 - current_price) / current_price) * 100, 1)
-            pct_46_90 = round(((target_46_90 - current_price) / current_price) * 100, 1)
-            
-            str_1_15 = f"+{pct_1_15}%" if pct_1_15 > 0 else f"{pct_1_15}%"
-            str_16_45 = f"+{pct_16_45}%" if pct_16_45 > 0 else f"{pct_16_45}%"
-            str_46_90 = f"+{pct_46_90}%" if pct_46_90 > 0 else f"{pct_46_90}%"
-
-            # --- 5. Enhanced 6-Feature Machine Learning Classifier ---
+            # ML Signal Confidence
             hist['Returns'] = hist['Close'].pct_change()
             hist['RSI'] = self.calculate_rsi(hist['Close'], 14)
-            hist['CMF'] = cmf_20
-            hist['ATR_Pct'] = tr.rolling(14).mean() / hist['Close']
-            hist['EMA_Dist'] = (hist['Close'] - ema_20) / ema_20
             
-            ema12 = hist['Close'].ewm(span=12, adjust=False).mean()
-            ema26 = hist['Close'].ewm(span=26, adjust=False).mean()
-            macd = ema12 - ema26
-            signal = macd.ewm(span=9, adjust=False).mean()
-            hist['MACD_Hist'] = macd - signal
-
             if direction == "Bullish":
                 hist['Target_Class'] = np.where(hist['Returns'].shift(-5) > 0.005, 1, 0)
             else:
                 hist['Target_Class'] = np.where(hist['Returns'].shift(-5) < -0.005, 1, 0)
-
-            features = ['Returns', 'RSI', 'CMF', 'ATR_Pct', 'EMA_Dist', 'MACD_Hist']
+                
+            features = ['Returns', 'RSI']
             df_ml = hist[features + ['Target_Class']].dropna()
-
+            
             ml_confidence = 50.0
-            if len(df_ml) > 50:
+            if len(df_ml) > 30:
                 X = df_ml[features]
                 y = df_ml['Target_Class']
-                unique_classes = np.unique(y[:-1])
+                clf = RandomForestClassifier(n_estimators=40, random_state=42)
+                clf.fit(X[:-1], y[:-1])
+                last_features = np.array([hist[features].iloc[-1]])
+                ml_confidence = round(float(clf.predict_proba(last_features)[0][1]) * 100, 1)
 
-                if len(unique_classes) > 1:
-                    clf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-                    clf.fit(X[:-1], y[:-1])
+            # Target Bands & Dynamic Stoploss
+            vol = hist['Returns'].rolling(window=20).std().iloc[-1]
+            if pd.isna(vol) or vol == 0: vol = 0.02
+                
+            if direction == "Bullish":
+                target_short = round(current_price * (1 + (vol * 1.8)), 2)
+                target_long = round(current_price * (1 + (vol * 4.3)), 2)
+                stoploss = round(current_price * (1 - (vol * 1.2)), 2)
+                entry_range = f"₹{round(current_price * 0.995, 2)} - ₹{round(current_price * 1.005, 2)}"
+            else:
+                target_short = round(current_price * (1 - (vol * 1.8)), 2)
+                target_long = round(current_price * (1 - (vol * 4.3)), 2)
+                stoploss = round(current_price * (1 + (vol * 1.2)), 2)
+                entry_range = f"₹{round(current_price * 0.995, 2)} - ₹{round(current_price * 1.005, 2)}"
 
-                    last_features = pd.DataFrame([hist[features].iloc[-1]], columns=features)
-                    probs = clf.predict_proba(last_features)[0]
+            pct_short = round(((target_short - current_price) / current_price) * 100, 1)
+            pct_long = round(((target_long - current_price) / current_price) * 100, 1)
+            
+            str_pct_short = f"+{pct_short}%" if pct_short > 0 else f"{pct_short}%"
+            str_pct_long = f"+{pct_long}%" if pct_long > 0 else f"{pct_long}%"
 
-                    if 1 in clf.classes_:
-                        idx_1 = np.where(clf.classes_ == 1)[0][0]
-                        ml_confidence = round(float(probs[idx_1]) * 100, 1)
-                    else:
-                        ml_confidence = 0.0
-
-            # Insert new prediction into historical tracker database
+            # SQLite Log
             cursor.execute("SELECT id FROM predictions WHERE date=? AND ticker=?", (today_str, ticker))
             if not cursor.fetchone():
                 cursor.execute('''
-                    INSERT INTO predictions (
-                        date, ticker, signal_price, direction, buy_zone, stop_loss, rvol, risk_reward, ml_confidence, 
-                        target_1_15, target_16_45, target_46_90, fii_dii_status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (today_str, ticker, round(current_price, 2), direction, buy_zone_str, sl_str, rvol_val, rr_ratio, ml_confidence, target_1_15, target_16_45, target_46_90, fii_dii_flow))
+                    INSERT INTO predictions (date, ticker, signal_price, direction, ml_confidence, entry_range, stoploss, rvol, target_short, target_long, fii_dii_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (today_str, ticker, current_price, direction, ml_confidence, entry_range, stoploss, rvol, target_short, target_long, fii_dii_flow))
 
-            clean_symbol = ticker.replace(".NS", "")
+            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
             tv_url = f"https://www.tradingview.com/chart/?symbol=NSE%3A{clean_symbol}"
 
             screened_results.append({
-                "Ticker": ticker,
-                "Current Market Price": round(current_price, 2),
-                "Buy Zone Range": buy_zone_str,
-                "Stop Loss (% Risk)": sl_str,
-                "R:R Ratio": rr_str,
-                "RVOL Spike": rvol_str,
+                "Ticker": clean_symbol,
+                "RawTicker": ticker,
+                "Current Price": current_price,
+                "Price Change": price_change,
+                "Price Change Pct": price_change_pct,
                 "Momentum Vector": direction,
-                "ML Signal Confidence": f"{ml_confidence}%",
-                "Swing Target (1-15d)": f"{target_1_15} ({str_1_15})",
-                "Medium Target (16-45d)": f"{target_16_45} ({str_16_45})",
-                "Structural Target (46-90d)": f"{target_46_90} ({str_46_90})",
+                "ML Signal Confidence": ml_confidence,
+                "Entry Range": entry_range,
+                "Stoploss": stoploss,
+                "RVol": rvol,
+                "Swing Target 1-15d": f"₹{target_short} ({str_pct_short})",
+                "Structural Target 20-90d": f"₹{target_long} ({str_pct_long})",
+                "Target Short Num": target_short,
+                "Target Long Num": target_long,
                 "FII/DII Institutional Flow": fii_dii_flow,
-                "TradingView Link": tv_url,
-                "CMF_Val": last_cmf
+                "TradingView Link": tv_url
             })
-
+            
         conn.commit()
         conn.close()
-
-        if screened_results:
-            df_res = pd.DataFrame(screened_results)
-            df_res = df_res.sort_values(by="CMF_Val", ascending=False).drop(columns=["CMF_Val"])
-            return df_res
-            
         return pd.DataFrame(screened_results)
 
     def run_backtest(self):
-        """Precise Historical Backtest Simulator with 3 Timeframe Target Validations."""
         backtest_logs = []
         for ticker, data in self.data_store.items():
-            hist = data["history"].copy()
-            if len(hist) < 200: continue
-            
+            hist = data["history"]
+            if len(hist) < 150: continue
             close_prices = hist['Close']
-            ema_20 = close_prices.ewm(span=20, adjust=False).mean()
-            ema_50 = close_prices.ewm(span=50, adjust=False).mean()
+            sma_50 = close_prices.rolling(window=50).mean()
             
-            high_low = hist['High'] - hist['Low']
-            high_close = np.abs(hist['High'] - hist['Close'].shift())
-            low_close = np.abs(hist['Low'] - hist['Close'].shift())
-            tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr_series = tr.rolling(window=14).mean()
-            
-            for i in range(150, len(hist) - 90, 12):
-                trigger_price = close_prices.iloc[i]
-                e20_val = ema_20.iloc[i]
-                e50_val = ema_50.iloc[i]
-                atr_val = atr_series.iloc[i]
+            for i in range(100, len(hist) - 90, 15):
+                price_at_trigger = close_prices.iloc[i]
+                sma_val = sma_50.iloc[i]
+                date_at_trigger = hist.index[i].strftime('%Y-%m-%d')
                 
-                if pd.isna(e20_val) or pd.isna(atr_val) or atr_val == 0: continue
+                if pd.isna(sma_val): continue
+                direction = "Bullish" if price_at_trigger >= sma_val else "Bearish"
                 
-                date_str = hist.index[i].strftime('%Y-%m-%d')
-                direction = "Bullish" if trigger_price >= e20_val else "Bearish"
-                atr_pct = atr_val / trigger_price
+                forward_window = hist.iloc[i+1 : i+91]
+                max_forward = forward_window['High'].max()
+                min_forward = forward_window['Low'].min()
                 
-                if direction == "Bullish":
-                    target_1_15 = round(trigger_price * (1 + (atr_pct * 2.2)), 2)
-                    target_16_45 = round(trigger_price * (1 + (atr_pct * 3.5)), 2)
-                    target_46_90 = round(trigger_price * (1 + (atr_pct * 5.0)), 2)
-                else:
-                    target_1_15 = round(trigger_price * (1 - (atr_pct * 2.2)), 2)
-                    target_16_45 = round(trigger_price * (1 - (atr_pct * 3.5)), 2)
-                    target_46_90 = round(trigger_price * (1 - (atr_pct * 5.0)), 2)
-                
-                window_15 = hist.iloc[i+1 : i+16]
-                window_45 = hist.iloc[i+1 : i+46]
-                window_90 = hist.iloc[i+1 : i+91]
-                
-                if window_15.empty or window_45.empty or window_90.empty: continue
-                
-                if direction == "Bullish":
-                    hit_1_15 = window_15['High'].max() >= target_1_15
-                    hit_16_45 = window_45['High'].max() >= target_16_45
-                    hit_46_90 = window_90['High'].max() >= target_46_90
-                else:
-                    hit_1_15 = window_15['Low'].min() <= target_1_15
-                    hit_16_45 = window_45['Low'].min() <= target_16_45
-                    hit_46_90 = window_90['Low'].min() <= target_46_90
+                max_upside = ((max_forward - price_at_trigger) / price_at_trigger) * 100
+                max_drawdown = ((min_forward - price_at_trigger) / price_at_trigger) * 100
                 
                 backtest_logs.append({
                     "Ticker": ticker.replace(".NS", ""),
-                    "Sim Date": date_str,
-                    "Trigger Price": round(trigger_price, 2),
-                    "Vector": direction,
-                    "Target (1-15d)": target_1_15,
-                    "Status (1-15d)": "Hit" if hit_1_15 else "Missed",
-                    "Target (16-45d)": target_16_45,
-                    "Status (16-45d)": "Hit" if hit_16_45 else "Missed",
-                    "Target (46-90d)": target_46_90,
-                    "Status (46-90d)": "Hit" if hit_46_90 else "Missed"
+                    "Sim Date": date_at_trigger,
+                    "Trigger Price": round(price_at_trigger, 2),
+                    "Direction": direction,
+                    "Simulated Peak Return %": round(max_upside, 2),
+                    "Simulated Max Drawdown %": round(max_drawdown, 2)
                 })
         return pd.DataFrame(backtest_logs)
 
